@@ -1,154 +1,169 @@
-#This script will take all critical issues within a project and create a single Jira ticket
+#This script will combine all issues with the same Snyk vuln database ID
+#into one Jira ticket sorted by a specific project tag
+from pickle import FALSE
 import requests
 import json
 
-#Snyk Parameters
-org_id="xxxxxx"
-project_id="xxxxxxx"
-snyk_token="xxxxxxx"
+#
+## Variables
+#
+#Snyk Parameters (required)
+#Add a org or group ID. If both are added, group will be used
+organization_id = ''
+group_id = ''
+#Suggest using a group service account to ensure we have access to all orgs
+snyk_token = ''
 snyk_headers = {
   'Authorization': 'token '+snyk_token,
   'Content-Type': 'application/json'
 }
 
-#Jira Parameters
-jira_token="xxxx"
-jira_proj_id="xxx"
+#Jira Parameters (required)
+#The link below goes over the authorization property for jira_auth
+#https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis
+#Some additional info may be needed depending on your auth process for Jira
+jira_project_id = ''
+jira_api_url = "https://<your-site>.atlassian.net/rest/api/2/issue"
+jira_auth = ''
+jira_headers = {
+  'Authorization': 'Basic '+jira_auth,
+  'Content-Type': 'application/json',
+}
 
-#Pull in project info from Snyk
-snyk_url="https://snyk.io/api/v1/org/"+org_id+"/project/"+project_id
-snyk_body={}
+#Variables we'll use throughout the process
+group_url = 'https://api.snyk.io/api/v1/group/'+group_id+'/orgs?perPage=100'
+orgs = []
+projects = [] #Each is a dict: {org: {name, id, slug}, projects: [{}, {}, ...]}
+sorted_issues = {}
 
-response = requests.request("GET", snyk_url, headers=snyk_headers, data=snyk_body)
-response_dict = response.json()
-crit_count=str((response_dict['issueCountsBySeverity']['critical']))
-proj_name=response_dict['name']
-proj_link=response_dict['browseUrl']
+#
+## Functions
+#
+def fetch_data(method, org_id, proj_id):
+  global projects
+  base_url = 'https://app.snyk.io/api/v1/org/'+org_id
 
-#Pull in list of critical issues from the project
-snyk_url="https://snyk.io/api/v1/org/"+org_id+"/project/"+project_id+"/aggregated-issues"
+  #Fetch issues if the project ID is supplied
+  if proj_id:
+    call_url = base_url+'/project/'+proj_id+'/aggregated-issues'
+  #Fetch projects if the project ID isn't supplied
+  else:
+    call_url = base_url+'/projects'
 
-snyk_body= json.dumps({
-  "includeDescription": False,
-  "includeIntroducedThrough": False,
-  "filters": {
-    "severities": [
-      "critical"
-    ],
-    "exploitMaturity": [
-      "mature",
-      "proof-of-concept",
-      "no-known-exploit",
-      "no-data"
-    ],
-    "types": [
-      "vuln",
-      "license"
-    ],
-    "ignored": False,
-    "patched": False,
-    "priority": {
-      "score": {
-        "min": 0,
-        "max": 1000
+  response = requests.request(method, call_url, headers=snyk_headers, data={})
+
+  if response.status_code == 200:
+    r_json = response.json()
+    #We need the org slug name to build a link later
+    if not proj_id:
+      r_json['org']['slug'] = org['slug']
+      projects.append(r_json)
+    else:
+      return r_json
+
+#
+## Snyk Process
+#
+#Start by fetching the projects for your group if group_id has a value
+if group_id:
+  response = requests.request('GET', group_url, headers=snyk_headers, data={})
+
+  if response.status_code == 200:
+    orgs = response.json()['orgs']
+
+#Fetch the projects that each org contains and populate projects
+#with the results
+if orgs:
+  for org in orgs:
+    if org['id']:
+      fetch_data('POST', org['id'], '')
+elif organization_id:
+  fetch_data('POST', organization_id, '')
+
+#With projects populated we can get a list of their issues
+#using the org id and project id
+#Sort the issues into a main category based on a tag then
+#sort them in that category by their Snyk vuln id
+if projects:
+  for org in projects:
+    for proj in org['projects']:
+      #Need to find the tag we want to begin sorting issues by
+      #The project tag property is a list of dictionaries
+      if proj['tags']:
+        for tag in proj['tags']:
+          if tag['key'] == 'app': #The overall tag we'll be sorting by
+            curr_tag = tag['value']
+            #Create the new key/value if not already in sorted_issues
+            if curr_tag not in sorted_issues:
+              sorted_issues[curr_tag] = {}
+
+            #Time to grab the project's issues
+            issues = fetch_data('POST', org['org']['id'], proj['id'])
+            #Loop through the issues and grab the data we want
+            #then populate sorted_issues with that data
+            for issue in issues['issues']:
+              issue_id = issue['id']
+              issue_data = issue['issueData']
+
+              if issue_id not in sorted_issues[curr_tag]:
+                sorted_issues[curr_tag][issue_id] = {
+                  'url': issue_data['url'],
+                  'title': issue_data['title'],
+                  'issue_links': []
+                }
+
+              i_link = (
+                'https://app.snyk.io/org/'+org['org']['slug']+
+                '/project/'+proj['id']+'#issue-'+issue_id
+              )
+              sorted_issues[curr_tag][issue_id]['issue_links'].append(i_link)
+
+#
+## Jira Process
+#
+#Will have to add the other issue info in the body field of the main ticket
+#which can include a link to the issue and any other additional info needed
+#Confluence link about wiki markup for description
+#https://confluence.atlassian.com/doc/confluence-wiki-markup-251003035.html
+jira_labels = list(sorted_issues.keys())
+
+for label in jira_labels:
+  issue_ids = list(sorted_issues[label].keys())
+  label_data = sorted_issues[label]
+
+  for id in issue_ids:
+    curr_issue = label_data[id]
+    desc_text = (
+      'Snyk Vulnerability Database ID: '+id+
+      '\\\\ Snyk Vulnerability Database Link: ['+curr_issue['url']+']'
+      ' \\\\ \\\\'
+    )
+    ticket = {
+      'fields': {
+        'project': {
+          'key': jira_project_id
+        },
+        'summary': curr_issue['title'],
+        'description': '',
+        'issuetype': {
+          'name': 'Bug'
+        },
+        'labels': [
+          label
+        ]
       }
     }
-  }
-})
 
-response = requests.request("POST", snyk_url, headers=snyk_headers, data=snyk_body)
-response_dict = response.json()
+    for link in curr_issue['issue_links']:
+      desc_text = desc_text+'* ['+link+'] \\\\ '
 
-#Creating the payload for the Jira ticket
-payload=  {
-    "fields": {
-       "project":
-       {
-          "key": jira_proj_id
-       },
-       "summary": proj_name+" - "+crit_count+" Critical Vulnerabilities",
-		 "description": {
-            "version": 1,
-            "type": "doc",
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "There are currently "+crit_count+" Critical Vulnerabilities in your project. Click "
-                        },                        
-						{
-                            "type": "text",
-                            "text": "here",
-                            "marks": [
-                                {
-                                    "type": "link",
-                                    "attrs": {
-                                        "href": proj_link
-                                    }
-                                }
-                            ]
-                        },
-                        {
-                            "type": "text",
-                            "text": " to access the project."
-                        }
-                    ]
-                }
-            ]
-        },
-       "issuetype": {
-          "name": "Task"
-       }
-   }
-}
+    ticket['fields']['description'] = desc_text
+    payload = json.dumps(ticket)
+    t_response = requests.request(
+      'POST', jira_api_url, headers=jira_headers, data=payload
+    )
 
-desc_count=1
-while response_dict['issues']:
-	issue = response_dict['issues'].pop()
-
-	payload['fields']['description']['content'].append({
-                    "type": "paragraph",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": issue['pkgName']+" - "+issue['issueData']['title'],
-                            "marks":[
-                            {
-                            	"type": "strong"
-                            }
-                            ]
-                        },   
-                       	{
-                            "type": "text",
-                            "text": "\nCVSS Score: "+str(issue['issueData']['cvssScore'])+"\nMaturity: "+issue['priority']['factors'][0]['description']
-                        },                      
-								{
-                            "type": "text",
-                            "text": "\nMore info",
-                            "marks": [
-                                {
-                                    "type": "link",
-                                    "attrs": {
-                                        "href": issue['issueData']['url']
-                                    }
-                                }
-                            ]
-                        }
-                    ]
-                }
-                )	
-
-	desc_count+=1
-url = "https://snyksec.atlassian.net/rest/api/3/issue"
-payload=json.dumps(payload)
-
-headers = {
-  'Authorization': 'Basic xxxxxxxxx',
-  'Content-Type': 'application/json',
-  'Cookie': 'xxxxx'
-}
-
-response = requests.request("POST", url, headers=headers, data=payload)
-print(response.text)
+#Here are two print lines if you would like to track the progress
+#or need to debug
+#print(t_response.status_code)
+#print(t_response.text)
