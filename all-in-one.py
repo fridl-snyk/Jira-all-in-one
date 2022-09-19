@@ -163,7 +163,7 @@ for label in jira_labels:
       'POST', jira_api_url, headers=jira_headers, data=payload
     )
 
-#Here are two print lines if you would like to track the progress
-#or need to debug
-#print(t_response.status_code)
-#print(t_response.text)
+    #Here are two print lines if you would like to track the progress
+    #or need to debug
+    #print(t_response.status_code)
+    #print(t_response.text)
