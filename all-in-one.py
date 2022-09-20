@@ -1,6 +1,5 @@
 #This script will combine all issues with the same Snyk vuln database ID
 #into one Jira ticket sorted by a specific project tag
-from pickle import FALSE
 import requests
 import json
 
