@@ -7,7 +7,7 @@ import json
 ## Variables
 #
 #Snyk Parameters (required)
-#Add a org or group ID. If both are added, group will be used
+#Add an org or group ID. If both are added, group will be used
 organization_id = ''
 group_id = ''
 #Suggest using a group service account to ensure we have access to all orgs
