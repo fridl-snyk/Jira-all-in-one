@@ -68,21 +68,21 @@ def fetch_data(method, org_id, proj_id):
 
 def sort_issues():
   for project in temp_org['projects']:
-    if project['tags']:
-      verify_tags(project)
+    verify_tags(project)
 
 def verify_tags(project):
-  for tag in project['tags']:
-    if tag['key'] == 'app': #The overall tag we'll be sorting by
-      curr_tag = tag['value']
-      #Create the new key/value if not already in sorted_issues
-      if curr_tag not in sorted_issues:
-        sorted_issues[curr_tag] = {}
+  if project['tags']:
+    for tag in project['tags']:
+      if tag['key'] == 'app': #The overall tag we'll be sorting by
+        curr_tag = tag['value']
+        #Create the new key/value if not already in sorted_issues
+        if curr_tag not in sorted_issues:
+          sorted_issues[curr_tag] = {}
 
-      #Time to grab the project's issues
-      issues = fetch_data('POST', temp_org['org']['id'], project['id'])
-      #Go through the issues and add their links to sorted_issues
-      add_issue_links(issues, curr_tag, project['id'])
+        #Time to grab the project's issues
+        issues = fetch_data('POST', temp_org['org']['id'], project['id'])
+        #Go through the issues and add their links to sorted_issues
+        add_issue_links(issues, curr_tag, project['id'])
 
 def add_issue_links(issues, curr_tag, proj_id):
   for issue in issues['issues']:
