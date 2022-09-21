@@ -1,6 +1,5 @@
 #This script will combine all issues with the same Snyk vuln database ID
 #into one Jira ticket sorted by a specific project tag
-from pickle import FALSE
 import requests
 import json
 
@@ -35,12 +34,12 @@ group_url = 'https://api.snyk.io/api/v1/group/'+group_id+'/orgs?perPage=100'
 orgs = []
 projects = [] #Each is a dict: {org: {name, id, slug}, projects: [{}, {}, ...]}
 sorted_issues = {}
+temp_org = {} #Used when sorting issues
 
 #
 ## Functions
 #
 def fetch_data(method, org_id, proj_id):
-  global projects
   base_url = 'https://app.snyk.io/api/v1/org/'+org_id
 
   #Fetch issues if the project ID is supplied
@@ -56,10 +55,52 @@ def fetch_data(method, org_id, proj_id):
     r_json = response.json()
     #We need the org slug name to build a link later
     if not proj_id:
-      r_json['org']['slug'] = org['slug']
+      org_url = (
+        'https://api.snyk.io/v3/orgs/'+org_id+
+        '?version=2022-08-12~experimental'
+      )
+      org_rep = requests.request('GET', org_url, headers=snyk_headers, data={})
+      org_json = org_rep.json()
+      r_json['org']['slug'] = org_json['data']['attributes']['slug']
       projects.append(r_json)
     else:
       return r_json
+
+def sort_issues():
+  for project in temp_org['projects']:
+    if project['tags']:
+      verify_tags(project)
+
+def verify_tags(project):
+  for tag in project['tags']:
+    if tag['key'] == 'app': #The overall tag we'll be sorting by
+      curr_tag = tag['value']
+      #Create the new key/value if not already in sorted_issues
+      if curr_tag not in sorted_issues:
+        sorted_issues[curr_tag] = {}
+
+      #Time to grab the project's issues
+      issues = fetch_data('POST', temp_org['org']['id'], project['id'])
+      #Go through the issues and add their links to sorted_issues
+      add_issue_links(issues, curr_tag, project['id'])
+
+def add_issue_links(issues, curr_tag, proj_id):
+  for issue in issues['issues']:
+    issue_id = issue['id']
+    issue_data = issue['issueData']
+
+    if issue_id not in sorted_issues[curr_tag]:
+      sorted_issues[curr_tag][issue_id] = {
+        'url': issue_data['url'],
+        'title': issue_data['title'],
+        'issue_links': []
+      }
+
+    i_link = (
+      'https://app.snyk.io/org/'+temp_org['org']['slug']+
+      '/project/'+proj_id+'#issue-'+issue_id
+    )
+    sorted_issues[curr_tag][issue_id]['issue_links'].append(i_link)
 
 #
 ## Snyk Process
@@ -86,37 +127,8 @@ elif organization_id:
 #sort them in that category by their Snyk vuln id
 if projects:
   for org in projects:
-    for proj in org['projects']:
-      #Need to find the tag we want to begin sorting issues by
-      #The project tag property is a list of dictionaries
-      if proj['tags']:
-        for tag in proj['tags']:
-          if tag['key'] == 'app': #The overall tag we'll be sorting by
-            curr_tag = tag['value']
-            #Create the new key/value if not already in sorted_issues
-            if curr_tag not in sorted_issues:
-              sorted_issues[curr_tag] = {}
-
-            #Time to grab the project's issues
-            issues = fetch_data('POST', org['org']['id'], proj['id'])
-            #Loop through the issues and grab the data we want
-            #then populate sorted_issues with that data
-            for issue in issues['issues']:
-              issue_id = issue['id']
-              issue_data = issue['issueData']
-
-              if issue_id not in sorted_issues[curr_tag]:
-                sorted_issues[curr_tag][issue_id] = {
-                  'url': issue_data['url'],
-                  'title': issue_data['title'],
-                  'issue_links': []
-                }
-
-              i_link = (
-                'https://app.snyk.io/org/'+org['org']['slug']+
-                '/project/'+proj['id']+'#issue-'+issue_id
-              )
-              sorted_issues[curr_tag][issue_id]['issue_links'].append(i_link)
+    temp_org = org
+    sort_issues()
 
 #
 ## Jira Process
