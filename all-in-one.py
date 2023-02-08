@@ -1,6 +1,7 @@
 #This script will combine all issues with the same Snyk vuln database ID
 #into one Jira ticket sorted by a specific project tag
 import requests
+from requests.auth import HTTPBasicAuth
 import json
 
 #
@@ -16,17 +17,17 @@ snyk_headers = {
   'Authorization': 'token '+snyk_token,
   'Content-Type': 'application/json'
 }
+snyk_tag_key = '' #The tag on your Snyk projects that we'll be sorting issues by
 
 #Jira Parameters (required)
-#The link below goes over the authorization property for jira_auth
-#https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis
 #Some additional info may be needed depending on your auth process for Jira
 jira_project_id = ''
-jira_api_url = "https://<your-site>.atlassian.net/rest/api/2/issue"
-jira_auth = ''
+jira_api_url = 'https://<your-site>.atlassian.net/rest/api/2/issue'
+jira_user = ''
+jira_api_token = ''
+jira_auth = HTTPBasicAuth(jira_user, jira_api_token)
 jira_headers = {
-  'Authorization': 'Basic '+jira_auth,
-  'Content-Type': 'application/json',
+  'Content-Type': 'application/json'
 }
 
 #Variables we'll use throughout the process
@@ -73,7 +74,7 @@ def sort_issues():
 def verify_tags(project):
   if project['tags']:
     for tag in project['tags']:
-      if tag['key'] == 'app': #The overall tag we'll be sorting by
+      if tag['key'] == snyk_tag_key:
         curr_tag = tag['value']
         #Create the new key/value if not already in sorted_issues
         if curr_tag not in sorted_issues:
@@ -172,7 +173,7 @@ for label in jira_labels:
     ticket['fields']['description'] = desc_text
     payload = json.dumps(ticket)
     t_response = requests.request(
-      'POST', jira_api_url, headers=jira_headers, data=payload
+      'POST', jira_api_url, headers=jira_headers, auth=jira_auth,  data=payload
     )
 
     #Here are two print lines if you would like to track the progress
