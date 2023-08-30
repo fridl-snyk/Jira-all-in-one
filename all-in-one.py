@@ -31,7 +31,7 @@ jira_headers = {
 }
 
 #Variables we'll use throughout the process
-group_url = 'https://api.snyk.io/api/v1/group/'+group_id+'/orgs?perPage=100'
+group_url = 'https://api.snyk.io/v1/group/'+group_id+'/orgs?perPage=100'
 orgs = []
 projects = [] #Each is a dict: {org: {name, id, slug}, projects: [{}, {}, ...]}
 sorted_issues = {}
@@ -41,14 +41,12 @@ temp_org = {} #Used when sorting issues
 ## Functions
 #
 def fetch_data(method, org_id, proj_id):
-  base_url = 'https://app.snyk.io/api/v1/org/'+org_id
-
   #Fetch issues if the project ID is supplied
   if proj_id:
-    call_url = base_url+'/project/'+proj_id+'/aggregated-issues'
+    call_url = 'https://api.snyk.io/v1/org/'+org_id+'/project/'+proj_id+'/aggregated-issues'
   #Fetch projects if the project ID isn't supplied
   else:
-    call_url = base_url+'/projects'
+    call_url = 'https://api.snyk.io/rest/orgs/'+org_id+'/projects'
 
   response = requests.request(method, call_url, headers=snyk_headers, data={})
 
@@ -57,7 +55,7 @@ def fetch_data(method, org_id, proj_id):
     #We need the org slug name to build a link later
     if not proj_id:
       org_url = (
-        'https://api.snyk.io/v3/orgs/'+org_id+
+        'https://api.snyk.io/rest/orgs/'+org_id+
         '?version=2022-08-12~experimental'
       )
       org_rep = requests.request('GET', org_url, headers=snyk_headers, data={})
